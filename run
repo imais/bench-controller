@@ -1,0 +1,68 @@
+#!/bin/bash
+
+OUTPUT_DIR="output"
+REMOTE_DIR="/home/ubuntu/"
+HOSTS="hosts"
+IPMON_LOG="ipmon.log"
+SYSMON_LOG="sysmon.log"
+TEST_PERIOD_SEC=60
+
+pscp() {
+    local src=$1
+    local dst=$2
+    while read host; do
+        if [[ $host != \#* ]]; then
+            local cmd="scp ${src} ubuntu@${host}:${dst}"
+            echo $cmd
+            eval $cmd
+        fi
+    done < "${HOSTS}"
+}
+
+pslurp() {
+    local output_dir=$1
+    local src=$2
+    
+    while read host; do
+        if [[ $host != \#* ]]; then
+            host_dir=${output_dir}/${host}
+            if [[ ! -d ${host_dir} ]] ; then
+                mkdir -p ${host_dir}
+            fi
+            local cmd="scp ubuntu@${host}:$src ${host_dir}"
+            echo $cmd
+            eval $cmd
+        fi
+    done < ${HOSTS}
+}
+
+run_pdsh() {
+    local remote_cmd=$1
+    local cmd="pdsh -R ssh -l ubuntu -g ${HOSTS} \"${remote_cmd}\""
+    echo $cmd
+    eval $cmd
+}
+
+cp ${HOSTS} ~/.dsh/group/
+# pscp ~/Repos/ipmon/ipmon ${REMOTE_DIR}
+pscp ${HOSTS} ${REMOTE_DIR}
+run_pdsh "sudo ${REMOTE_DIR}ipmon ${REMOTE_DIR}hosts >& ${REMOTE_DIR}${IPMON_LOG} &"
+run_pdsh "sudo ${REMOTE_DIR}sysmon 0 ${REMOTE_DIR}${SYSMON_LOG} 0x48040020 10000 2 > /dev/null &"
+
+echo 'Monitoring in progress...'
+sleep ${TEST_PERIOD_SEC}
+
+run_pdsh "sudo pkill --signal 2 ipmon"
+run_pdsh "sudo pkill --signal 2 sysmon"
+echo 'Done testing! Collecting data...'
+
+if [ ! -d "${OUTPUT_DIR}" ]; then
+    mkdir -p ${OUTPUT_DIR}
+fi
+
+pslurp ${OUTPUT_DIR} ${REMOTE_DIR}${IPMON_LOG}
+pslurp ${OUTPUT_DIR} ${REMOTE_DIR}${SYSMON_LOG}
+
+echo 'All done!'
+
+

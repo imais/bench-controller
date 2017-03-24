@@ -1,0 +1,9 @@
+#!/bin/bash
+
+if [ "$#" -ne 1 ]
+then
+    echo "Usage: ./extract_hosts [storm-log]"
+    exit 1
+fi
+
+cat $1 | cut -d ' ' -f4 | sort > tmp; sed -i $'s/\t//g' tmp; cat tmp; rm tmp

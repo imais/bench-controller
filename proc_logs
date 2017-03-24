@@ -1,0 +1,69 @@
+#!/bin/bash
+
+IPMON_LOG="ipmon.log"
+SYSMON_LOG="sysmon.log"
+
+
+if [[ $1 = "" ]] ; then
+    echo "Usage: $0 {rsort|sol|wc|clean|grep|pv|visitor|trident|rcount} [number of VMs]"
+    exit 1
+else
+    app=$1
+fi
+
+target_dir=$app/$2vm
+
+if [[ ! -e ${target_dir} ]] ; then
+        echo "${target_dir} does not exist"
+        exit 1
+fi
+
+
+# syslog format for 0x48040020:
+#  time  : 1:cpu_user,2:cpu_sys,3:cpu_nice,4:cpu_idle,5:cpu_iowait,6:disk.util,7:net.util,8:mem.util
+#  61.670: 24.030,2.287,0.000,73.626,0.048,0.000,0.011,4.000,
+
+declare -a metrics=(
+    "null" 
+    "cpu_user" "cpu_sys" "cpu_nice" "cpu_idle" "cpu_iowait" 
+    "disk.util" "net.util" "mem.util"
+)
+declare -A data
+declare -A output
+
+proc_dir() {
+    local machine=$1
+
+    if [[ -d $machine ]] ; then
+        log=`cat $machine/${SYSMON_LOG} | tail -1`
+        for i in $(seq 1 8); do
+            if [[ $i == 1 ]] ; then
+                data[${metrics[$i]}]=`echo $log | cut -d "," -f1 | cut -d " " -f2`
+            else
+                data[${metrics[$i]}]=`echo $log | cut -d "," -f$i`
+            fi
+        done
+
+        cpu_util=`echo "100.0 - ${data[cpu_idle]}" | bc`
+        echo "$(basename $machine): ${cpu_util}, ${data[mem.util]}, ${data[net.util]}"
+    fi
+}
+
+proc_dir ${target_dir}/kafka1
+proc_dir ${target_dir}/nimbus1
+proc_dir ${target_dir}/zkserver1
+
+# slave1,...,slave9
+for machine in ${target_dir}/slave? ; do
+    proc_dir $machine
+done
+
+# slave10,...,slave99
+for machine in ${target_dir}/slave?? ; do
+    proc_dir $machine
+done
+
+exit 0
+
+
+
