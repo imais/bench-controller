@@ -1,0 +1,55 @@
+#!/bin/bash
+
+if [ $# -eq 0 ] ; then
+  OUTPUT_DIR="output"
+else
+  OUTPUT_DIR=$1
+fi
+REMOTE_DIR="/home/ubuntu/"
+HOSTS="hosts"
+IPMON_LOG="ipmon.log"
+SYSMON_LOG="sysmon.log"
+TEST_PERIOD_SEC=15
+
+run_pssh() {
+    local remote_cmd=$1
+    local cmd="pssh -l ubuntu -h ${HOSTS} \"${remote_cmd}\""
+    echo $cmd
+    eval $cmd
+}
+
+run_cmd() {
+    local cmd=$1
+    echo $cmd
+    eval $cmd
+}
+
+
+echo 'Start monitoring!'
+
+run_cmd "pscp -l ubuntu -h ${HOSTS} ${HOSTS} ${REMOTE_DIR}"
+run_pssh "sudo ${REMOTE_DIR}ipmon ${REMOTE_DIR}hosts >& ${REMOTE_DIR}${IPMON_LOG} &"
+run_pssh "sudo ${REMOTE_DIR}sysmon 0 ${REMOTE_DIR}${SYSMON_LOG} 0x48040020 10000 2 > /dev/null &"
+
+echo ''
+echo 'Monitoring in progress...'
+sleep ${TEST_PERIOD_SEC}
+
+run_pssh "sudo pkill --signal 2 ipmon"
+run_pssh "sudo pkill --signal 2 sysmon"
+echo ''
+echo 'Done testing! Collecting data...'
+
+if [ ! -d "${OUTPUT_DIR}" ]; then
+    mkdir -p ${OUTPUT_DIR}
+else
+    rm -rf ${OUTPUT_DIR}/*
+fi
+
+run_cmd "pslurp -l ubuntu -h ${HOSTS} -L ${OUTPUT_DIR} ${REMOTE_DIR}${IPMON_LOG} ."
+run_cmd "pslurp -l ubuntu -h ${HOSTS} -L ${OUTPUT_DIR} ${REMOTE_DIR}${SYSMON_LOG} ."
+
+echo ''
+echo 'Done monitoring!'
+
+

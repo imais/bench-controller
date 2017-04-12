@@ -1,51 +1,73 @@
 #!/bin/bash
 
-OUTPUT_DIR="output"
-REMOTE_DIR="/home/ubuntu/"
-HOSTS="hosts"
-IPMON_LOG="ipmon.log"
-SYSMON_LOG="sysmon.log"
-TEST_PERIOD_SEC=15
+if [ $# -lt 2 ] ; then
+    echo "Usage; ./run {rsort|sol|wc|clean|grep|pv|visitor|rcount} [#iterations]"
+    exit 1
+fi 
 
-run_pssh() {
-    local remote_cmd=$1
-    local cmd="pssh -l ubuntu -h ${HOSTS} \"${remote_cmd}\""
-    echo $cmd
-    eval $cmd
-}
+APP=$1
+ITERATIONS=$2
+STORM_UI_SERVER=localhost:8080
+METRICS_INTERVAL_SEC=30
 
-run_cmd() {
-    local cmd=$1
-    echo $cmd
-    eval $cmd
-}
+# components
+declare -a comps
 
+case $APP in
+    rsort)
+        comps=("spout" "sort")
+        ;;
+    sol)
+        comps=("spout" "bolt")        
+        ;;
+    wc)
+        comps=("spout" "split" "count")
+        ;;
+    clean)
+        comps=("spout" "view" "filter")
+        ;;
+    grep)
+        comps=("spout" "find" "count")
+        ;;
+    pv)
+        comps=("spout" "view" "count")
+        ;;
+    visitor)
+        comps=("spout" "view" "uniquer")
+        ;;
+    rcount)
+        comps=("spout" "split" "rolling_count")
+        ;;
+esac
+    
 
-echo 'Start monitoring!'
+wget http://${STORM_UI_SERVER}/api/v1/topology/summary
 
-run_cmd "pscp -l ubuntu -h ${HOSTS} ${HOSTS} ${REMOTE_DIR}"
-run_pssh "sudo ${REMOTE_DIR}ipmon ${REMOTE_DIR}hosts >& ${REMOTE_DIR}${IPMON_LOG} &"
-run_pssh "sudo ${REMOTE_DIR}sysmon 0 ${REMOTE_DIR}${SYSMON_LOG} 0x48040020 10000 2 > /dev/null &"
-
-echo ''
-echo 'Monitoring in progress...'
-sleep ${TEST_PERIOD_SEC}
-
-run_pssh "sudo pkill --signal 2 ipmon"
-run_pssh "sudo pkill --signal 2 sysmon"
-echo ''
-echo 'Done testing! Collecting data...'
-
-if [ ! -d "${OUTPUT_DIR}" ]; then
-    mkdir -p ${OUTPUT_DIR}
-else
-    rm -rf ${OUTPUT_DIR}/*
+topo_id=`cat summary | jq '.topologies[].id' | tr -d '"'`
+if [[ ${topo_id} == "" ]] ; then
+    echo "Topology is not running. Abort."
+    exit 1
 fi
 
-run_cmd "pslurp -l ubuntu -h ${HOSTS} -L ${OUTPUT_DIR} ${REMOTE_DIR}${IPMON_LOG} ."
-run_cmd "pslurp -l ubuntu -h ${HOSTS} -L ${OUTPUT_DIR} ${REMOTE_DIR}${SYSMON_LOG} ."
+echo ${topo_id}
+mkdir ${topo_id}
+mv summary ${topo_id}
+
+for comp in ${comps[@]}; do
+    echo $comp
+    wget http://${STORM_UI_SERVER}/api/v1/topology/${topo_id}/component/${comp}
+    mv $comp ${topo_id}
+done
+
+./get_metrics ${topo_id}/1
+for ((i=2; i <= $ITERATIONS; i++)) ; do
+    sleep ${METRICS_INTERVAL_SEC}
+    echo ''
+    echo 'Waiting for the next metrics sampling...'
+    ./get_metrics ${topo_id}/$i
+done
 
 echo ''
 echo 'All done!'
 
-
+    
