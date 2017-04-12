@@ -7,7 +7,7 @@ fi
 
 APP=$1
 ITERATIONS=$2
-STORM_UI_SERVER=localhost:8080
+STORM_UI_SERVER=nimbus1:8080
 METRICS_INTERVAL_SEC=30
 
 # components
@@ -59,12 +59,19 @@ for comp in ${comps[@]}; do
     mv $comp ${topo_id}
 done
 
-./get_metrics ${topo_id}/1
+# Get metrics at least once
+echo ''
+echo "Getting metrics for ${APP} (1/${ITERATIONS})..."
+echo ''
+./get_metrics ${topo_id}/1 true
+
 for ((i=2; i <= $ITERATIONS; i++)) ; do
-    sleep ${METRICS_INTERVAL_SEC}
     echo ''
     echo 'Waiting for the next metrics sampling...'
-    ./get_metrics ${topo_id}/$i
+    sleep ${METRICS_INTERVAL_SEC}
+    echo ''
+    echo "Getting metrics for ${APP} ($i/${ITERATIONS})..."
+    ./get_metrics ${topo_id}/$i false
 done
 
 echo ''
