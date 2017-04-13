@@ -8,10 +8,18 @@ fi
 APP=$1
 ITERATIONS=$2
 STORM_UI_SERVER=nimbus1:8080
+FIRST_INTERVAL_SEC=60
 METRICS_INTERVAL_SEC=30
 
-# components
-declare -a comps
+declare -a comps        # components
+declare -a results      # results
+
+function sum_kafka_out() {
+    # compute the total network traffic coming out of Kafka
+    kafka_out=`find $1 -name ipmon.log | grep slave | xargs grep kafka1,  | awk -F ', ' '{print $4"\n"}' | awk '{sum += $1} END {printf "%.5f", (sum/1024/1024)}'`
+}
+
+function join_by { local IFS="$1"; shift; echo "$*"; }
 
 case $APP in
     rsort)
@@ -59,11 +67,16 @@ for comp in ${comps[@]}; do
     mv $comp ${topo_id}
 done
 
-# Get metrics at least once
+echo ''
+echo 'Waiting for the first metrics sampling...'
+sleep ${FIRST_INTERVAL_SEC}
+
 echo ''
 echo "Getting metrics for ${APP} (1/${ITERATIONS})..."
 echo ''
 ./get_metrics ${topo_id}/1 true
+sum_kafka_out ${topo_id}/1
+results+=(${kafka_out})
 
 for ((i=2; i <= $ITERATIONS; i++)) ; do
     echo ''
@@ -72,9 +85,13 @@ for ((i=2; i <= $ITERATIONS; i++)) ; do
     echo ''
     echo "Getting metrics for ${APP} ($i/${ITERATIONS})..."
     ./get_metrics ${topo_id}/$i false
+    sum_kafka_out ${topo_id}/$i
+    results+=(${kafka_out})
 done
 
 echo ''
 echo 'All done!'
 
+echo ''
+join_by $'\t' "${results[@]}"
     
