@@ -1,0 +1,8 @@
+#!/bin/bash
+
+slaves=`cat ./supervisors`
+num_slaves=${slaves#slave}
+
+echo "Killing ${num_slaves} supervisors"
+#pdsh -R ssh -l ubuntu -g slave${num_slaves} 'pkill backtype.storm.daemon.worker'
+pdsh -R ssh -l ubuntu -g slave${num_slaves} 'pkill java'

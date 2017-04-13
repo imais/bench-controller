@@ -1,0 +1,12 @@
+#!/bin/bash
+
+if [[ -z $1 ]]; then
+   echo "Usage: ./run_supervisor [1-32]"
+   exit 1
+fi
+
+echo "Starting $1 supervisors..."
+pdsh -R ssh -l ubuntu -g slave$1 'sudo rm -rf /app/storm; sudo mkdir -p /app/storm; sudo chown -R ubuntu:ubuntu /app/storm; /usr/local/storm/bin/storm supervisor < /dev/null > /home/ubuntu/supervisor.log 2>&1 &'
+
+echo "Saving current supervisors..."
+echo slave$1 > ./supervisors
