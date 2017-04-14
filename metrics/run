@@ -1,14 +1,8 @@
 #!/bin/bash
 
-if [ $# -lt 2 ] ; then
-    echo "Usage; ./run {rsort|sol|wc|clean|grep|pv|visitor|rcount} [#iterations]"
-    exit 1
-fi 
-
-APP=$1
-ITERATIONS=$2
+APP=`cat ../storm/topo`
+ITERATIONS=3
 STORM_UI_SERVER=nimbus1:8080
-FIRST_INTERVAL_SEC=60
 METRICS_INTERVAL_SEC=30
 
 declare -a comps        # components
@@ -66,10 +60,6 @@ for comp in ${comps[@]}; do
     wget http://${STORM_UI_SERVER}/api/v1/topology/${topo_id}/component/${comp}
     mv $comp ${topo_id}
 done
-
-echo ''
-echo 'Waiting for the first metrics sampling...'
-sleep ${FIRST_INTERVAL_SEC}
 
 echo ''
 echo "Getting metrics for ${APP} (1/${ITERATIONS})..."

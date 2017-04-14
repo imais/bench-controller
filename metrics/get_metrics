@@ -35,19 +35,16 @@ echo 'Start monitoring!'
 if [ ${COPY_HOSTS} != "false" ] ; then
     run_cmd "pscp -l ubuntu -h ${HOSTS} ${HOSTS} ${REMOTE_DIR}"
 else
-    echo ''
     echo "Skipping hosts file copy"
 fi
 run_pssh "sudo ${REMOTE_DIR}ipmon ${REMOTE_DIR}hosts >& ${REMOTE_DIR}${IPMON_LOG} &"
 run_pssh "sudo ${REMOTE_DIR}sysmon 0 ${REMOTE_DIR}${SYSMON_LOG} 0x48040020 10000 2 > /dev/null &"
 
-echo ''
 echo 'Monitoring in progress...'
 sleep ${TEST_PERIOD_SEC}
 
 run_pssh "sudo pkill --signal 2 ipmon"
 run_pssh "sudo pkill --signal 2 sysmon"
-echo ''
 echo 'Done testing! Collecting data...'
 
 if [ ! -d "${OUTPUT_DIR}" ]; then
@@ -59,7 +56,6 @@ fi
 run_cmd "pslurp -l ubuntu -h ${HOSTS} -L ${OUTPUT_DIR} ${REMOTE_DIR}${IPMON_LOG} ."
 run_cmd "pslurp -l ubuntu -h ${HOSTS} -L ${OUTPUT_DIR} ${REMOTE_DIR}${SYSMON_LOG} ."
 
-echo ''
 echo 'Done monitoring!'
 
 

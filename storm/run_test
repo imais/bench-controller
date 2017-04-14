@@ -1,0 +1,179 @@
+#!/bin/bash
+
+if [[ -z $2 ]]; then
+    echo "Usage; ./run {rsort|sol|wc|clean|grep|pv|visitor|rcount} [#VMs(m)]"
+    exit 1    
+fi
+
+APP=$1
+m=$2
+
+NUM_TEST=3
+NUM_ITERATIONS=3
+ITERATION_PER_TEST=3
+
+DELAY_BEFORE_TOPO_START_SEC=60
+METRICS_INTERVAL_SEC=30
+TEST_INTERVAL_SEC=10
+
+RUN_TOPO=./run_topo
+KILL_TOPO=./kill_topo
+GET_METRICS=../metrics/get_metrics
+OUTPUT_DIR=../data
+REMOTE_DIR=/home/ubuntu/
+
+METRICS_TARGET_HOSTS=(zkserver1 nimbus1 kafka1)
+
+STORM_UI_SERVER=nimbus1:8080
+
+declare -a comps        # components
+declare -a results      # results
+
+function sum_kafka_out() {
+    # compute the total network traffic coming out of Kafka
+    kafka_out=`find $1 -name ipmon.log | grep slave | xargs grep kafka1,  | awk -F ', ' '{print $4"\n"}' | awk '{sum += $1} END {printf "%.5f", (sum/1024/1024)}'`
+}
+
+function join_by { local IFS="$1"; shift; echo "$*"; }
+
+function create_hosts_file() {
+    if [ -f hosts ] ; then 
+        rm hosts
+    fi
+    touch hosts
+    for host in ${METRICS_TARGET_HOSTS[@]}; do
+        echo $host >> hosts
+    done
+    for ((i=1; i <= $m; i++)) ; do
+        printf "slave%03d\n" $i >> hosts
+    done
+}
+
+
+function do_test() {
+    local out_dir=$1
+
+    case $APP in
+        rsort)
+            comps=("spout" "sort")
+            ;;
+        sol)
+            comps=("spout" "bolt")        
+            ;;
+        wc)
+            comps=("spout" "split" "count")
+            ;;
+        clean)
+            comps=("spout" "view" "filter")
+            ;;
+        grep)
+            comps=("spout" "find" "count")
+            ;;
+        pv)
+            comps=("spout" "view" "count")
+            ;;
+        visitor)
+            comps=("spout" "view" "uniquer")
+            ;;
+        rcount)
+            comps=("spout" "split" "rolling_count")
+            ;;
+    esac
+
+    echo ''
+    echo "Getting topology info ${APP}..."
+
+    wget http://${STORM_UI_SERVER}/api/v1/topology/summary
+    # summary can be saved as summary.1
+    if [ -f "summary" ] ; then
+        summary="summary"
+    elif [ -f "summary.1" ] ; then
+        summary="summary.1"
+    else
+        echo "Summary file not found. Abort."
+        exit 1        
+    fi
+
+    topo_id=`cat ${summary} | jq '.topologies[].id' | tr -d '"'`
+    if [[ ${topo_id} == "" ]] ; then
+        echo "Topology is not running. Abort."
+        exit 1
+    fi
+
+    echo ${topo_id}
+    local topo_out_dir=${out_dir}/${topo_id}
+    mkdir -p ${topo_out_dir}
+    mv ${summary} ${topo_out_dir}
+
+    for comp in ${comps[@]}; do
+        echo $comp
+        wget http://${STORM_UI_SERVER}/api/v1/topology/${topo_id}/component/${comp}
+        mv $comp ${topo_out_dir}
+    done
+
+    echo ''
+    echo "Getting metrics for ${APP} (1/${NUM_ITERATIONS})..."
+    echo ''
+    ${GET_METRICS} ${topo_out_dir}/1 false
+    sum_kafka_out ${topo_out_dir}/1
+    results+=(${kafka_out})
+
+    for ((j=2; j <= ${NUM_ITERATIONS}; j++)) ; do
+        echo ''
+        echo 'Waiting for the next metrics sampling...'
+        sleep ${METRICS_INTERVAL_SEC}
+        echo ''
+        echo "Getting metrics for ${APP} ($i/${NUM_ITERATIONS})..."
+        ${GET_METRICS} ${topo_out_dir}/$j false
+        sum_kafka_out ${topo_out_dir}/$j
+        results+=(${kafka_out})
+    done
+}
+
+
+# main loop
+echo "Start testing ${APP} with m = ${m}"
+
+out_dir=${OUTPUT_DIR}/${APP}/`printf "%03dvm" $m`
+echo ''
+echo "Creating output dir: ${out_dir}"
+mkdir -p ${out_dir}
+
+echo "Creating and copying hosts file..."
+create_hosts_file
+pscp -l ubuntu -h hosts hosts ${REMOTE_DIR}
+
+for ((i=1; i <= $NUM_TEST; i++)) ; do
+    echo ''
+    echo "====== Starting test ($i/${NUM_TEST}) ======"
+    echo ''
+
+    ${RUN_TOPO} $APP $m
+
+    echo ''
+    echo "Waiting $APP to start up..."
+    sleep ${DELAY_BEFORE_TOPO_START_SEC}
+
+    do_test ${out_dir}
+
+    echo ''
+    echo "====== Testing done ($i/${NUM_TEST}) ======"
+
+    ${KILL_TOPO}
+
+    if [ $i -eq $NUM_TEST ] ; then
+        break
+    fi
+
+    echo ''
+    echo "Waiting before the next test"
+    sleep ${TEST_INTERVAL_SEC}
+done
+
+echo ''
+echo "All done!!"
+
+echo ''
+join_by $'\t' "${results[@]}"
+
+

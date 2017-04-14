@@ -1,7 +1,8 @@
 #!/bin/bash
 
-JAR="./target/storm-bench-0.1-jar-with-dependencies.jar"
-CONF="./conf/conf.yaml"
+STORM_BENCH_HOME=~/Repos/storm-bench
+JAR="${STORM_BENCH_HOME}/target/storm-bench-0.1-jar-with-dependencies.jar"
+CONF="${STORM_BENCH_HOME}/conf/conf.yaml"
 PACKAGE="rpi.storm.benchmark"
 CORES_PER_VM=2
 
