@@ -112,7 +112,7 @@ function do_test() {
     done
 
     echo ''
-    echo "Getting metrics for ${APP} (1/${NUM_ITERATIONS})..."
+    echo "Test $i: getting metrics (1/${NUM_ITERATIONS})..."
     echo ''
     ${GET_METRICS} ${topo_out_dir}/1 false
     sum_kafka_out ${topo_out_dir}/1
@@ -123,7 +123,7 @@ function do_test() {
         echo 'Waiting for the next metrics sampling...'
         sleep ${METRICS_INTERVAL_SEC}
         echo ''
-        echo "Getting metrics for ${APP} ($i/${NUM_ITERATIONS})..."
+        echo "Test $i: getting metrics ($i/${NUM_ITERATIONS})..."
         ${GET_METRICS} ${topo_out_dir}/$j false
         sum_kafka_out ${topo_out_dir}/$j
         results+=(${kafka_out})
