@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# apps=(rsort sol wc clean grep pv visitor rcount)
+# vms=(1 2 4 8)
+apps=(wc)
+vms=(1 2)
+
+source ./benchlib
+
+local i, j
+for ((i = 0; i < ${#apps[@]}; i++)) ; do
+    for ((j = 0; j < ${#vm[@]}; j++)) ; do
+        # copy hosts_file to all the nodes
+        create_hosts_file ${vm[$j]}
+        run_cmd "pscp -l ${REMOTE_USER} -h ${HOSTS_FILE} ${HOSTS_FILE} ${REMOTE_DIR}"
+
+        # create dst filter for tcpdump
+        create_tcpdump_filter ${vm[$j]}
+        scp ${TCPDUMP_FILTER} ${REMOTE_USER}@${TCPDUMP_HOST}:${REMOTE_DIR}
+
+		run_supervisors $vm
+		run_cmd "sleep ${POST_RUN_SUPERVISOR_WAIT_SEC}"
+
+		test_results=()
+		run_test $app $vm
+
+		kill_supervisors
+
+        if [ $i -eq $((${#apps[@]} - 1)) ] && [ $j -eq $((${#vm[@]} - 1)) ] ; then
+            break
+        fi
+
+		sleep ${POST_KILL_SUPERVISOR_WAIT_SEC}
+	done
+
+    cat `find ${app[$i]} -name results` > ${app[$i]}/results
+    mail -s "Finished ${app[$i]} !!" ${EMAIL_NOTIFICATION_ADDRESS} < ${app[$i]}/results
+done
+
+echo ''
+echo 'All done!'
+
+
