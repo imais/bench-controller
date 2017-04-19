@@ -12,20 +12,21 @@ NUM_SAMPLING=3   # sampling per test
 SAMPLING_PERIOD_SEC=15
 SAMPLING_INTERVAL_SEC=20
 
-HOSTS_FILE=./hosts
+HOSTS_FILE=hosts
+TCPDUMP_FILTER=tcpdump_filter
 TCPDUMP="${REMOTE_DIR}/tcpdump"
-TCPDUMP_FILTER=="${REMOTE_DIR}/tcpdump_filter"
+SYSMON="${REMOTE_DIR}/sysmon"
 
-POST_RUN_SUPERVISOR_WAIT_SEC=20
-POST_KILL_SUPERVISOR_WAIT_SEC=20
+POST_RUN_SUPERVISOR_WAIT_SEC=5
+POST_KILL_SUPERVISOR_WAIT_SEC=5
 
 
 ###### misc functions
 
 function join_by { local IFS="$1"; shift; echo "$*"; }
-
-function run_cmd { echo $1; eval $1; }
-
+function get_date { date "+%Y-%m-%d %H:%M:%S"; }
+function dbg_print { echo "`get_date`": $1; }
+function run_cmd { dbg_print $1; eval $1; }
 function run_pssh {
     local remote_cmd=$1
     local cmd="pssh -l ${REMOTE_USER} -h ${HOSTS_FILE} \"${remote_cmd}\""
@@ -38,7 +39,7 @@ function run_pssh {
 function run_supervisors {
     local m
     if [ $# -eq 0 ] || [ ${#1} -gt 3 ] ; then
-        echo "Usage: ./run_supervisor [1-128]"
+        dbg_print "Usage: ./run_supervisor [1-128]"
         exit 1
     elif [ ${#1} -eq 1 ] ; then
         m=00$1
@@ -47,18 +48,18 @@ function run_supervisors {
     elif [ ${#1} -eq 3 ] ; then
         m=$1
     fi
-    echo "Starting $m supervisors..."
+    dbg_print "Starting $m supervisors..."
     # pdsh -R ssh -l ${REMOTE_USER} -w slave[001-$m] 'sudo rm -rf /app/storm; sudo mkdir -p /app/storm; sudo chown -R ${REMOTE_USER}:${REMOTE_USER} /app/storm; /usr/local/storm/bin/storm supervisor < /dev/null > /home/${REMOTE_USER}/supervisor.log 2>&1 &'
 
-    echo "Saving current supervisors..."
-    echo $m > ./supervisors
+    dbg_print "`get_date`: Saving current supervisors..."
+    dbg_print $m > ./supervisors
 }
 
 
 function kill_supervisors {
     local m
     m=`cat ./supervisors`
-    echo "Killing ${m} supervisors"
+    dbg_print "`get_date`: Killing ${m} supervisors"
     # pdsh -R ssh -l ${REMOTE_USER} -w slave[001-$m] 'pkill java'
 }
 
@@ -67,7 +68,7 @@ function kill_supervisors {
 
 function run_topo {
     if [ $# -ne 2 ] ; then
-        echo "Usage: run_topo {rsort|sol|wc|clean|grep|pv|visitor|rcount} [#VMs(m)]"
+        dbg_print "Usage: run_topo {rsort|sol|wc|clean|grep|pv|visitor|rcount} [#VMs(m)]"
         exit 1    
     fi
 
@@ -127,7 +128,7 @@ function run_topo {
             ;;
     esac
 
-    echo "Submitting ${topo}..."
+    dbg_print "Submitting ${topo}..."
 
     local parallel=$[$2 * ${CORES_PER_VM} / ${num_comps}]
     if [ $parallel -lt 1 ] ; then
@@ -138,7 +139,7 @@ function run_topo {
 
     run_cmd "storm jar ${JAR} ${PACKAGE}.${class} ${topo} -conf ${CONF} -topic ${topic} -parallel ${parallel} -workers ${workers} -ackers ${ackers}"
 
-    echo ${topo} > ./topo
+    dbg_print ${topo} > ./topo
 }
 
 
@@ -177,7 +178,7 @@ function kill_topo {
             ;;
     esac
 
-    echo "Killing ${topo}..."
+    dbg_print "Killing ${topo}..."
     run_cmd "storm kill -w 0 ${topo} || true"
 }
 
@@ -192,18 +193,18 @@ function sample_metrics {
         output_dir=$1
     fi
     
-    echo 'Start sampling'
+    dbg_print 'Start sampling'
     run_cmd "ssh ${REMOTE_USER}@${TCPDUMP_HOST} \"sudo ${TCPDUMP} -i eth0 -Q out -F ${TCPDUMP_FILTER} --throughput-tracking-mode >& tcpdump.log\""
-    run_pssh "sudo ${REMOTE_DIR}/sysmon 0 ${REMOTE_DIR}/sysmon.log 0x48040020 10000 2 > /dev/null &"
+    run_pssh "sudo ${SYSMON} 0 ${REMOTE_DIR}/sysmon.log 0x48040020 10000 2 > /dev/null &"
 
-    echo ''
-    echo 'Monitoring in progress...'
+    dbg_print ''
+    dbg_print 'Monitoring in progress...'
     sleep ${SAMPLING_PERIOD_SEC}
 
     run_cmd "ssh ${REMOTE_USER}@${TCPDUMP_HOST} \"sudo pkill --signal 2 tcpdump\""
     run_pssh "sudo pkill --signal 2 sysmon"
-    echo ''
-    echo 'Done testing! Collecting metrics...'
+    dbg_print ''
+    dbg_print 'Done testing! Collecting metrics...'
 
     if [ ! -d "${output_dir}" ]; then
         mkdir -p ${output_dir}
@@ -214,8 +215,8 @@ function sample_metrics {
     run_cmd "scp ${REMOTE_USER}@${TCPDUMP_HOST} ${REMOTE_DIR}/tcpdump.log ${output_dir}/"
     run_cmd "pslurp -l ${REMOTE_USER} -h ${HOSTS_FILE} -L ${output_dir} ${REMOTE_DIR}/sysmon.log ."
 
-    echo ''
-    echo 'Done sampling'
+    dbg_print ''
+    dbg_print 'Done sampling'
 }
 
 
@@ -223,17 +224,20 @@ function sample_metrics {
 
 function create_hosts_file {
     if [ $# -ne 1 ] ; then
-        echo "Usage: create_hosts_file [#VMs(m)]"
+        dbg_print "Usage: create_hosts_file [#VMs(m)]"
         exit 1
     fi
+
     local m=$1
+
+    dbg_print "Creating hosts file for ${m} VMs"
 
     if [ -f ${HOSTS_FILE} ] ; then 
         rm ${HOSTS_FILE}
     fi
     touch ${HOSTS_FILE}
 
-    local host, i
+    local host i
     for host in ${HOSTS[@]}; do
         echo $host >> ${HOSTS_FILE}
     done
@@ -245,29 +249,36 @@ function create_hosts_file {
 
 function create_tcpdump_filter {
     if [ $# -ne 1 ] ; then
-        echo "Usage: create_tcpdump_filter [#VMs(m)]"
+        dbg_print "Usage: create_tcpdump_filter [#VMs(m)]"
         exit 1
     fi
     local m=$1
 
+    dbg_print "Creating tcpdump filter for ${m} VMs"
+
     if [ -f ${TCPDUMP_FILTER} ] ; then 
         rm ${TCPDUMP_FILTER}
     fi
-    touch ${TCPDUMP_FILTER}
 
-    local slaves=()
-    for ((i = 1; i <= $m; i++) ; do
-        slaves+=(`printf "slave%03d"`)
+    local slaves=() i
+    for ((i = 1; i <= $m; i++)) ; do
+        slaves+=(`printf "slave%03d" $i`)
     done
     
-    echo "dst " > ${TCPDUMP_FILTER}
-    join_by ' or ' ${slaves[@]} >> ${TCPDUMP_FILTER}
+    printf "dst " > ${TCPDUMP_FILTER}
+    for ((i = 0; i < ${#slaves[@]}; i++)) ; do 
+        if [ $i -eq $((${#slaves[@]} - 1)) ] ; then
+            printf "${slaves[$i]}\n" >> ${TCPDUMP_FILTER}
+        else
+            printf "${slaves[$i]} or " >> ${TCPDUMP_FILTER}
+        fi
+    done
 }
 
 
 function do_test() {
     if [ $# -ne 2 ] ; then
-        echo "Usage: do_test [app] [output directory]"
+        dbg_print "Usage: do_test [app] [output directory]"
         exit 1
     fi
 
@@ -302,8 +313,8 @@ function do_test() {
             ;;
     esac
 
-    echo ''
-    echo "Getting topology info ${app}..."
+    dbg_print ''
+    dbg_print "Getting topology info ${app}..."
 
     wget http://${STORM_UI_SERVER}/api/v1/topology/summary
     local summary
@@ -313,81 +324,81 @@ function do_test() {
     elif [ -f "summary.1" ] ; then
         summary="summary.1"
     else
-        echo "Summary file not found. Abort."
+        dbg_print "Summary file not found. Abort."
         exit 1        
     fi
 
     local topo_id=`cat ${summary} | jq '.topologies[].id' | tr -d '"'`
     if [[ ${topo_id} == "" ]] ; then
-        echo "Topology is not running. Abort."
+        dbg_print "Topology is not running. Abort."
         exit 1
     fi
 
-    echo ${topo_id}
+    dbg_print ${topo_id}
     local topo_out_dir=${out_dir}/${topo_id}
     mkdir -p ${topo_out_dir}
     mv ${summary} ${topo_out_dir}
 
     for comp in ${comps[@]}; do
-        echo $comp
+        dbg_print $comp
         wget http://${STORM_UI_SERVER}/api/v1/topology/${topo_id}/component/${comp}
         mv $comp ${topo_out_dir}
     done
 
     local i
     for ((i=1; i <= ${NUM_SAMPLING}; i++)) ; do
-        echo "Sampling metrics ($i/${NUM_SAMPLING})..."
+        dbg_print "Sampling metrics ($i/${NUM_SAMPLING})..."
         sample_metrics ${topo_out_dir}/$i
         local kafka_throughput=`tail -n1 ${topo_out_dir}/$i/tcpdump.log | cut -d' ' -f9`
-        echo "Kafka throughput = ${kafka_throughput}"
+        dbg_print "Kafka throughput = ${kafka_throughput}"
         test_results+=(${kafka_throughput})
 
         if [ $i -eq {NUM_SAMPLING} ] ; then
             break
         fi
 
-        echo ''
-        echo 'Waiting for the next metrics sampling...'
+        dbg_print ''
+        dbg_print 'Waiting for the next metrics sampling...'
         sleep ${SAMPLING_INTERVAL_SEC}
-        echo ''
+        dbg_print ''
     done
 }
 
 
 function run_test {
     if [ $# -ne 3 ] ; then
-        echo "Usage; ./run {rsort|sol|wc|clean|grep|pv|visitor|rcount} [#VMs(m)]"
+        dbg_print "Usage; ./run {rsort|sol|wc|clean|grep|pv|visitor|rcount} [#VMs(m)]"
         exit 1    
     fi
     
     local app=$1, m=$2
-    echo "Start testing ${app} with m = ${m}"
+    dbg_print "Start testing ${app} with m = ${m}"
 
     local out_dir=${OUTPUT_DIR}/${app}/`printf "%03dvm" $m`
-    echo ''
-    echo "Creating output dir: ${out_dir}"
+    dbg_print ''
+    dbg_print "Creating output dir: ${out_dir}"
     mkdir -p ${out_dir}
 
-    echo "Creating and copying hosts file..."
+    dbg_print "Creating and copying hosts file..."
     create_hosts_file
     pscp -l ${REMOTE_USER} -h ${HOSTS_FILE} ${HOSTS_FILE} ${REMOTE_DIR}
 
     local i
     for ((i=1; i <= $NUM_TESTS; i++)) ; do
-        echo ''
-        echo "====== Starting test ($i/${NUM_TESTS}) ======"
-        echo ''
+        dbg_print ''
+        dbg_print "====== Starting test ($i/${NUM_TESTS}) ======"
+        dbg_print ''
 
         run_topo $app $m
 
-        echo ''
-        echo "Waiting $app to start up..."
+        dbg_print ''
+        dbg_print "Waiting $app to start up..."
         run_cmd "sleep ${DELAY_BEFORE_TOPO_START_SEC}"
 
         do_test ${out_dir}
 
-        echo ''
-        echo "====== Testing done ($i/${NUM_TESTS}) ======"
+        dbg_print ''
+        dbg_print "====== Testing done ($i/${NUM_TESTS}) ======"
 
         kill_topo
 
@@ -395,13 +406,13 @@ function run_test {
             break
         fi
 
-        echo ''
-        echo "Sleeping before the next test"
+        dbg_print ''
+        dbg_print "Sleeping before the next test"
         sleep ${TEST_INTERVAL_SEC}
     done
 
-    echo ''
-    echo "Testing ${app} with m = ${m} done!!"
+    dbg_print ''
+    dbg_print "Testing ${app} with m = ${m} done!!"
 
-	echo $app\t$vm\t`join_by $'\t' ${test_results[@]}` >> ${out_dir}/results
+	dbg_print $app\t$vm\t`join_by $'\t' ${test_results[@]}` >> ${out_dir}/results
 }
