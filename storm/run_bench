@@ -2,42 +2,47 @@
 
 # apps=(rsort sol wc clean grep pv visitor rcount)
 # vms=(1 2 4 8)
-apps=(wc)
-vms=(1 2)
+apps=(wc grep)
+vms=(1 2 3 4 5 6 7 8 12 16 24 32 48 64 80 96 128)
 
 source ./benchlib
 
 dbg_print 'Start benchmarking!!'
 
 for ((i = 0; i < ${#apps[@]}; i++)) ; do
+    dbg_print "######## Start benchmarking ${apps[$i]} ########"
+
     for ((j = 0; j < ${#vms[@]}; j++)) ; do
-        # copy hosts_file to all the nodes
         create_hosts_file ${vms[$j]}
+        dbg_print "Copying ${HOSTS_FILE} file to participating hosts..."
         run_cmd "pscp -l ${REMOTE_USER} -h ${HOSTS_FILE} ${HOSTS_FILE} ${REMOTE_DIR}"
 
-        # create dst filter for tcpdump
         create_tcpdump_filter ${vms[$j]}
+        dbg_print "Copying ${TCPDUMP_FILTER} to ${TCPDUMP_HOST}..."
         scp ${TCPDUMP_FILTER} ${REMOTE_USER}@${TCPDUMP_HOST}:${REMOTE_DIR}
 
-		# run_supervisors $vm
-        dbg_print "Post run_supervisor wait: ${POST_RUN_SUPERVISOR_WAIT_SEC} seconds"
+		run_supervisors ${vms[$j]}
+        dbg_print "Post run supervisors wait: ${POST_RUN_SUPERVISOR_WAIT_SEC} seconds"
 		sleep ${POST_RUN_SUPERVISOR_WAIT_SEC}
 
 		test_results=()
-		# run_test $app $vm
+		run_test ${apps[$i]} ${vms[$j]}
 
-		# kill_supervisors
+		kill_supervisors
 
-        # if [ $i -eq $((${#apps[@]} - 1)) ] && [ $j -eq $((${#vm[@]} - 1)) ] ; then
-        #     break
-        # fi
+        if [ $i -eq $((${#apps[@]} - 1)) ] && [ $j -eq $((${#vm[@]} - 1)) ] ; then
+            break
+        fi
 
-        dbg_print "Post kill_supervisor wait: ${POST_KILL_SUPERVISOR_WAIT_SEC} seconds"
+        dbg_print "Post kill supervisors wait: ${POST_KILL_SUPERVISOR_WAIT_SEC} seconds"
 		sleep ${POST_KILL_SUPERVISOR_WAIT_SEC}
+        dbg_print "######## Done benchmarking ${apps[$i]} ########"
 	done
-
-    # cat `find ${app[$i]} -name results` > ${app[$i]}/results
-    # mail -s "[Storm-bench] Finished ${app[$i]} !!" ${EMAIL_NOTIFICATION_ADDRESS} < ${app[$i]}/results
+    
+    results_file=${OUTPUT_DIR}/${app[$i]}/results
+    cat `find ${OUTPUT_DIR}/${apps[$i]} -name results` > ${results_file}
+    dbg_print "Emailing results for ${apps[$i]}..."
+    mail -s "[Storm-bench] Finished ${apps[$i]} !!" ${EMAIL_NOTIFICATION_ADDRESS} < ${results_file}
 done
 
 dbg_print 'All done!'
