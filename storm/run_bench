@@ -45,6 +45,21 @@ for ((i = 0; i < ${#apps[@]}; i++)) ; do
     mail -s "[Storm-bench] Finished ${apps[$i]} !!" ${EMAIL_NOTIFICATION_ADDRESS} < ${results_file}
 done
 
+dbg_print "Stopping Kafka..."
+stop_kafka
+sleep 3
+
+dbg_print "Stopping Storm..."
+sudo pkill java # stop all the java processes including storm nimbus and ui
+sleep 3
+
+dbg_print "Stopping ZooKeeper..."
+stop_zkserver
+sleep 3
+
+dbg_print "Stopping All Running EC2 instances..."
+stop_instances
+
 dbg_print 'All done!'
 
 

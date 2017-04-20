@@ -393,3 +393,18 @@ function run_test {
     echo -e "$app\t$m\t`join_by $'\t' ${test_results[@]}`" >> ${out_dir}/results
     dbg_print "Wrote results to ${out_dir}/results"
 }
+
+function stop_instances {
+    local instances=()
+    instances+=(`aws ec2 describe-instances --region us-east-1 --filters Name=instance-state-name,Values=running | jq '.Reservations[].Instances[].InstanceId' -r`)
+    echo "Stopping running instances ${instances[@]}..."
+    aws ec2 stop-instances --instance-ids ${instances[@]}
+}
+
+function stop_kafka {
+    run_cmd "ssh ${REMOTE_USER}@${KAFKA_HOST} \"kafka-server-stop.sh\""
+}
+
+function stop_zkserver {
+    run_cmd "ssh ${REMOTE_USER}@${ZKSERVER_HOST} \"zkServer.sh stop\""
+}
