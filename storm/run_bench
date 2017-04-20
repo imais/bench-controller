@@ -54,7 +54,7 @@ sudo pkill java # stop all the java processes including storm nimbus and ui
 sleep 3
 
 dbg_print "Stopping ZooKeeper..."
-stop_zkserver
+stop_zkserver >& /dev/null
 sleep 3
 
 dbg_print "Stopping All Running EC2 instances..."

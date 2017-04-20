@@ -402,9 +402,9 @@ function stop_instances {
 }
 
 function stop_kafka {
-    run_cmd "ssh ${REMOTE_USER}@${KAFKA_HOST} \"kafka-server-stop.sh\""
+    run_cmd "ssh ${REMOTE_USER}@${KAFKA_HOST} \"${KAFKA_SERVER_STOP}\""
 }
 
 function stop_zkserver {
-    run_cmd "ssh ${REMOTE_USER}@${ZKSERVER_HOST} \"zkServer.sh stop\""
+    run_cmd "ssh ${REMOTE_USER}@${ZKSERVER_HOST} \"${ZKSERVER_STOP}\""
 }
