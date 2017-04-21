@@ -27,6 +27,7 @@ POST_KILL_TOPO_WAIT_SEC=15
 
 function join_by { local IFS="$1"; shift; echo "$*"; }
 function get_date { date "+%Y-%m-%d %H:%M:%S"; }
+function get_date_sec { date "+%s"; }
 function dbg_print { echo "`get_date`" $1; }
 function run_cmd { dbg_print "$1"; eval $1; }
 function run_pssh {
@@ -88,7 +89,7 @@ function run_topo {
             class=SOL
             topo=sol
             topic=bytes
-            num_comps=2
+            num_comps=3
             ;;
         wc)
             class=WordCount
@@ -285,7 +286,7 @@ function do_test() {
             comps=("spout" "sort")
             ;;
         sol)
-            comps=("spout" "bolt")        
+            comps=("spout" "bolt1" "bolt2")        
             ;;
         wc)
             comps=("spout" "split" "count")

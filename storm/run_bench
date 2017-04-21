@@ -2,7 +2,7 @@
 
 # apps=(rsort sol wc clean grep pv visitor rcount)
 # vms=(1 2 4 8)
-apps=(wc grep)
+apps=(sol rcount)
 vms=(1 2 3 4 5 6 7 8 12 16 24 32 48 64 80 96 128)
 
 source ./benchlib
@@ -39,7 +39,7 @@ for ((i = 0; i < ${#apps[@]}; i++)) ; do
         dbg_print "######## Done benchmarking ${apps[$i]} ########"
 	done
     
-    results_file=${OUTPUT_DIR}/${app[$i]}/results
+    results_file=${OUTPUT_DIR}/${app[$i]}/results-`get_date_sec`
     cat `find ${OUTPUT_DIR}/${apps[$i]} -name results` > ${results_file}
     dbg_print "Emailing results for ${apps[$i]}..."
     mail -s "[Storm-bench] Finished ${apps[$i]} !!" ${EMAIL_NOTIFICATION_ADDRESS} < ${results_file}
@@ -54,11 +54,11 @@ sudo pkill java # stop all the java processes including storm nimbus and ui
 sleep 3
 
 dbg_print "Stopping ZooKeeper..."
-stop_zkserver >& /dev/null
+stop_zkserver
 sleep 3
 
 dbg_print "Stopping All Running EC2 instances..."
-stop_instances
+stop_instances >& /dev/null
 
 dbg_print 'All done!'
 
