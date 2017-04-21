@@ -39,7 +39,7 @@ for ((i = 0; i < ${#apps[@]}; i++)) ; do
         dbg_print "######## Done benchmarking ${apps[$i]} ########"
 	done
     
-    results_file=${OUTPUT_DIR}/${app[$i]}/results-`get_date_sec`
+    results_file=${OUTPUT_DIR}/${apps[$i]}/results-`get_date_sec`
     cat `find ${OUTPUT_DIR}/${apps[$i]} -name results` > ${results_file}
     dbg_print "Emailing results for ${apps[$i]}..."
     mail -s "[Storm-bench] Finished ${apps[$i]} !!" ${EMAIL_NOTIFICATION_ADDRESS} < ${results_file}
