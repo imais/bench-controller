@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# apps=(rsort sol wc clean grep pv visitor rcount)
+# apps=(rsort sol wc clean grep pv visitor rcount vhtree)
 # vms=(1 2 4 8)
-apps=(sol rcount)
+apps=(sol rsort)
 vms=(1 2 3 4 5 6 7 8 12 16 24 32 48 64 80 96 128)
 
 source ./benchlib
@@ -14,8 +14,8 @@ for ((i = 0; i < ${#apps[@]}; i++)) ; do
 
     for ((j = 0; j < ${#vms[@]}; j++)) ; do
         create_hosts_file ${vms[$j]}
-        dbg_print "Copying ${HOSTS_FILE} file to participating hosts..."
-        run_cmd "pscp -l ${REMOTE_USER} -h ${HOSTS_FILE} ${HOSTS_FILE} ${REMOTE_DIR}"
+        # dbg_print "Copying ${HOSTS_FILE} file to participating hosts..."
+        # run_cmd "pscp -l ${REMOTE_USER} -h ${HOSTS_FILE} ${HOSTS_FILE} ${REMOTE_DIR}"
 
         create_tcpdump_filter ${vms[$j]}
         dbg_print "Copying ${TCPDUMP_FILTER} to ${TCPDUMP_HOST}..."
