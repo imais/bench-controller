@@ -163,6 +163,7 @@ function run_topo {
         export SAMOA_STORM_NUMWORKER=$m
 
         run_cmd "${SAMOA_HOME}/bin/samoa storm ${SAMOA_JAR} \"PrequentialEvaluation -d /tmp/dump.csv -i -1 -f 100000 -n ${topo} -l (classifiers.trees.VerticalHoeffdingTree -p ${parallel}) -s (org.apache.samoa.streams.kafka.KafkaStream -r 20 -t ${topic} -k $((${num_classes}+1)) -s ${KAFKA_HOST})\""
+        # run_cmd "${SAMOA_HOME}/bin/samoa storm ${SAMOA_JAR} \"PrequentialEvaluation -d /tmp/dump.csv -i -1 -f 100000 -n ${topo} -l (classifiers.trees.VerticalHoeffdingTree -p ${parallel}) -s (generators.RandomTreeGenerator -c 10 -o 100 -u 100)\""
     fi
 
     echo ${topo} > ./topo
@@ -335,6 +336,12 @@ function do_test() {
         rcount)
             comps=("spout" "split" "rolling_count")
             ;;
+        vhtree)
+            comps=(
+                "PrequentialSourceProcessor" "EvaluatorProcessor"
+                "FilterProcessor" "LocalStatisticsProcessor"
+                "ModelAggregatorProcessor")
+            ;;
         *)
             comps=()
             ;;
@@ -371,7 +378,6 @@ function do_test() {
             mv $comp ${topo_out_dir}
         done
     else
-        # Primarily for SAMOA apps
         topo_id=$app-`get_date_sec`
         dbg_print "Topology ID: ${topo_id}"
         local topo_out_dir=${out_dir}/${topo_id}

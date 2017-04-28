@@ -2,7 +2,7 @@
 
 # apps=(rsort sol wc clean grep pv visitor rcount vhtree)
 # vms=(1 2 4 8)
-apps=(sol rsort)
+apps=(vhtree)
 vms=(1 2 3 4 5 6 7 8 12 16 24 32 48 64 80 96 128)
 
 source ./benchlib
@@ -40,7 +40,7 @@ for ((i = 0; i < ${#apps[@]}; i++)) ; do
 	done
     
     results_file=${OUTPUT_DIR}/${apps[$i]}/results-`get_date_sec`
-    cat `find ${OUTPUT_DIR}/${apps[$i]} -name results` > ${results_file}
+    cat `find ${OUTPUT_DIR}/${apps[$i]} -name results` | sort -k2 -n > ${results_file}
     dbg_print "Emailing results for ${apps[$i]}..."
     mail -s "[Storm-bench] Finished ${apps[$i]} !!" ${EMAIL_NOTIFICATION_ADDRESS} < ${results_file}
 done
