@@ -54,18 +54,17 @@ public class KafkaRandomDataProducer extends Thread {
                   "org.apache.kafka.common.serialization.StringSerializer");
         props.put("value.serializer",
                   "org.apache.kafka.common.serialization.StringSerializer");
-        producer_ = null;
-        // producer_ = new KafkaProducer<String, String>(props);
+        producer_ = new KafkaProducer<String, String>(props);
     }
 
     public void sendMessage(String key, String value) {
-        // producer_.send(new ProducerRecord<String, String>(topic_, key, value));
-        try {
-            Thread.sleep(1000);
-        } catch (Exception ex) {
-            System.err.println(ex);
-        }
-        System.out.println("Sent message: (" + key + ", " + value + ")");
+        producer_.send(new ProducerRecord<String, String>(topic_, key, value));
+        // try {
+        //     Thread.sleep(1000);
+        // } catch (Exception ex) {
+        //     System.err.println(ex);
+        // }
+        // System.out.println("Sent message: (" + key + ", " + value + ")");
     }
 
     public String createRandomData() {
