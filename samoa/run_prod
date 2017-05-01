@@ -1,0 +1,1 @@
+java KafkaRandomDataProducer --brokers kafka1 --topic test --num_classes 5 --num_nominals 3 --num_numerics 3
