@@ -11,7 +11,7 @@ SAMOA_JAR="${SAMOA_HOME}/target/SAMOA-Storm-0.5.0-incubating-SNAPSHOT.jar"
 
 NUM_TESTS=2     # test per app
 NUM_SAMPLING=3  # sampling per test
-SAMPLING_PERIOD_SEC=15
+SAMPLING_PERIOD_SEC=60
 SAMPLING_INTERVAL_SEC=20
 
 HOSTS_FILE=hosts
@@ -71,7 +71,7 @@ function kill_supervisors {
 
 function run_topo {
     if [ $# -ne 2 ] ; then
-        dbg_print "Usage: run_topo {rsort|sol|wc|clean|grep|pv|visitor|rcount|vhtree} [#VMs(m)]"
+        dbg_print "Usage: run_topo {rsort|sol|wc|clean|grep|pv|visitor|rcount|trident|vhtree} [#VMs(m)]"
         exit 1    
     fi
 
@@ -135,11 +135,19 @@ function run_topo {
             topic=book
             num_comps=3
             ;;
+        trident)
+            class=TridentWordCount
+            topo=tridentcount
+            topic=book
+            num_comps=3
+            ;;
         vhtree)
             topo=vhtree
-            topic=covtype
+            # topic=covtype
+            # num_classes=7
+            topic=rand-tree
+            num_classes=10
             is_samoa=true
-            num_classes=7
     esac
 
     dbg_print "Submitting ${topo}..."
@@ -200,8 +208,11 @@ function kill_topo {
         rcount)
             topo=rollingcount
             ;;
-        preq)
-            topo=prequential
+        trident)
+            topo=trident
+            ;;
+        vhtree)
+            topo=vhtree
             ;;
         *)
             topo=`cat ./topo`
@@ -342,47 +353,41 @@ function do_test() {
                 "FilterProcessor" "LocalStatisticsProcessor"
                 "ModelAggregatorProcessor")
             ;;
-        *)
-            comps=()
-            ;;
     esac
 
-    if [ ${#comps[@]} -gt 0 ] ; then
-        dbg_print "Getting topology info for ${app}..."
+    dbg_print "Getting topology info for ${app}..."
 
-        run_cmd "wget -q http://${STORM_UI_SERVER}/api/v1/topology/summary"
-        local summary
-        # summary can be saved as summary.1
-        if [ -f "summary" ] ; then
-            summary="summary"
-        elif [ -f "summary.1" ] ; then
-            summary="summary.1"
-        else
-            dbg_print "Summary file not found. Abort."
-            exit 1        
-        fi
-
-        local topo_id=`cat ${summary} | jq '.topologies[].id' | tr -d '"'`
-        if [[ ${topo_id} == "" ]] ; then
-            dbg_print "Topology is not running. Abort."
-            exit 1
-        fi
-
-        dbg_print "Topology ID: ${topo_id}"
-        local topo_out_dir=${out_dir}/${topo_id}
-        mkdir -p ${topo_out_dir}
-        mv ${summary} ${topo_out_dir}
-
-        for comp in ${comps[@]}; do
-            run_cmd "wget -q http://${STORM_UI_SERVER}/api/v1/topology/${topo_id}/component/${comp}"
-            mv $comp ${topo_out_dir}
-        done
+    run_cmd "wget -q http://${STORM_UI_SERVER}/api/v1/topology/summary"
+    local summary
+    if [ -f "summary" ] ; then
+        summary="summary"
     else
-        topo_id=$app-`get_date_sec`
-        dbg_print "Topology ID: ${topo_id}"
-        local topo_out_dir=${out_dir}/${topo_id}
-        mkdir -p ${topo_out_dir}
+        dbg_print "Summary file not found. Abort."
+        exit 1        
     fi
+
+    local topo_id=`cat ${summary} | jq '.topologies[].id' | tr -d '"'`
+    if [[ ${topo_id} == "" ]] ; then
+        dbg_print "Topology is not running. Abort."
+        exit 1
+    fi
+
+    dbg_print "Topology ID: ${topo_id}"
+    local topo_out_dir=${out_dir}/${topo_id}
+    mkdir -p ${topo_out_dir}
+    mv ${summary} ${topo_out_dir}
+
+    run_cmd "wget -q http://${STORM_UI_SERVER}/api/v1/topology/${topo_id}"
+    if [ ${#comps[@]} -eq 0 ] ; then
+        comps=(`cat ${topo_id} | jq '.spouts[].spoutId' | tr -d '"'`)
+        comps+=(`cat ${topo_id} | jq '.bolts[].boltId' | tr -d '"'`)
+    fi
+    mv ${topo_id} ${topo_out_dir}
+
+    for comp in ${comps[@]}; do
+        run_cmd "wget -q http://${STORM_UI_SERVER}/api/v1/topology/${topo_id}/component/'${comp}'"
+        mv $comp ${topo_out_dir}
+    done
 
     local i
     for ((i=1; i <= ${NUM_SAMPLING}; i++)) ; do
