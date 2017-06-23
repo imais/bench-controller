@@ -1,0 +1,111 @@
+#!/bin/bash
+
+TCPDUMP="~/Repos/tcpdump/tcpdump"
+TCPDUMP_SAMPLE_INTERVAL_SEC=3
+# Convergence condition:
+#   If the latest monitored value is within STABLE_THRESHOLD_PERCENT[%] 
+#   compared to the previous monitored value for K times out of last N times,
+#   we determine the value is converged
+# WITHIN_X_PERCENT=5
+WITHIN_X_PERCENT=5
+N=5
+K=4
+
+function join_by { local IFS="$1"; shift; echo "$*"; }
+function get_date { date "+%Y-%m-%d %H:%M:%S"; }
+function get_date_sec { date "+%s"; }
+function dbg_print { echo "`get_date`" $1; }
+# function run_cmd { dbg_print "$1"; eval $1; }
+function run_cmd { eval $1; }
+function get_rand { 
+    awk -v seed=$RANDOM 'BEGIN { srand(seed); printf("%.5f\n", rand() * 100.0) }';
+}
+
+# queue and stack using an array
+# http://www.tech-recipes.com/rx/911/queue-and-stack-using-array/
+# https://stackoverflow.com/questions/9714902/how-to-use-a-variables-value-as-other-variables-name-in-bash
+# http://hipersayanx.blogspot.com/2012/12/object-oriented-programming-in-bash.html
+
+queue=()
+function queue_add {
+    # add an element to the end of the array
+    queue=(${queue[@]} $1)
+}
+function queue_remove {
+    # remove the first element
+    queue=(${queue[@]:1:$((${#queue[@]}))})
+}
+function queue_remove_all {
+    queue=()
+}
+function queue_show_all {
+    echo ${queue[@]}
+}
+function queue_len {
+    echo ${#queue[@]}
+}
+
+
+function get_throughput {
+    eval "sudo ${TCPDUMP} -i eth0 -Q out --throughput-tracking-mode >& tcpdump.log &"
+    sleep ${TCPDUMP_SAMPLE_INTERVAL_SEC}
+    sudo pkill tcpdump
+    echo `tail -n1 tcpdump.log | cut -d' ' -f9`
+}
+
+function is_within_x_percent {
+    local prev=$1
+    local curr=$2
+    # if [ $prev -eq 0 ] || [ $curr -eq 0 ] ; then
+    if (( $(bc <<< "$prev == 0.0") )) || (( $(bc <<< "$curr == 0.0") )) ; then
+        echo 0
+    else
+        local delta=$(eval "awk 'function abs(v) {return v < 0 ? -v : v}; BEGIN {printf \"%.5f\", 100*abs(($prev)-($curr))/abs($prev)}'")
+        if (( $(bc <<< "$delta < ${WITHIN_X_PERCENT}") )) ; then
+            echo 1
+        else
+            echo 0
+        fi
+    fi
+}
+
+function run_throughput_monitor {
+    local prev=0.0
+    local curr=0.0
+    local t=0
+
+    while : ; do
+        curr=`get_throughput`
+        t=$(($t + ${TCPDUMP_SAMPLE_INTERVAL_SEC}))
+        # curr=`get_rand`
+        # dbg_print "prev=$prev, curr=$curr"
+
+        within_x_percent=`is_within_x_percent $prev $curr`
+        run_cmd "queue_add ${within_x_percent}"
+
+        if [ `queue_len` -gt $N ] ; then
+            run_cmd "queue_remove"
+        fi
+
+        # queue_show_all
+
+        # K out N check
+        sum=0
+        for val in "${queue[@]}" ; do
+            sum=$(($sum + $val))
+        done
+
+        converged=0
+        if [ $sum -ge $K ] ; then
+            # echo "OK!!"
+            converged=1
+        fi
+
+        echo "$t, $curr, $sum, $converged"
+
+        prev=$curr
+    done
+}
+
+run_throughput_monitor
+
