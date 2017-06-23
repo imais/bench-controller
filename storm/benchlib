@@ -11,7 +11,7 @@ SAMOA_JAR="${SAMOA_HOME}/target/SAMOA-Storm-0.5.0-incubating-SNAPSHOT.jar"
 
 NUM_TESTS=2     # test per app
 NUM_SAMPLING=3  # sampling per test
-SAMPLING_PERIOD_SEC=15
+SAMPLING_PERIOD_SEC=60
 SAMPLING_INTERVAL_SEC=20
 
 HOSTS_FILE=hosts
@@ -143,9 +143,11 @@ function run_topo {
             ;;
         vhtree)
             topo=vhtree
-            topic=covtype
+            # topic=covtype
+            # num_classes=7
+            topic=rand-tree
+            num_classes=10
             is_samoa=true
-            num_classes=7
     esac
 
     dbg_print "Submitting ${topo}..."
