@@ -9,10 +9,11 @@ CORES_PER_VM=2
 
 SAMOA_JAR="${SAMOA_HOME}/target/SAMOA-Storm-0.5.0-incubating-SNAPSHOT.jar"
 
-NUM_TESTS=2     # test per app
+NUM_TESTS=3     # test per app
 NUM_SAMPLING=3  # sampling per test
-SAMPLING_PERIOD_SEC=60
-SAMPLING_INTERVAL_SEC=20
+SAMPLING_PERIOD_SEC=5
+SAMPLING_INTERVAL_SEC=5
+MAX_THROUGHPUT_MONITORING_SEC=120
 
 HOSTS_FILE=hosts
 TCPDUMP_FILTER=tcpdump_filter
@@ -21,8 +22,16 @@ SYSMON="${REMOTE_DIR}/sysmon"
 
 POST_RUN_SUPERVISOR_WAIT_SEC=20
 POST_KILL_SUPERVISOR_WAIT_SEC=10
-POST_RUN_TOPO_WAIT_SEC=90
+POST_RUN_TOPO_WAIT_SEC=20
 POST_KILL_TOPO_WAIT_SEC=15
+
+# Sampling convergence condition:
+#   If the latest monitored value is within WITHIN_X_PERCENT[%] 
+#   compared to the previous monitored value for K times out of last N times,
+#   we determine the value is converged
+WITHIN_X_PERCENT=5
+N=5
+K=4
 
 
 ###### misc functions
@@ -36,6 +45,30 @@ function run_pssh {
     local remote_cmd=$1
     local cmd="pssh -l ${REMOTE_USER} -h ${HOSTS_FILE} \"${remote_cmd}\""
     run_cmd "$cmd"
+}
+function get_rand { 
+    awk -v seed=$RANDOM 'BEGIN { srand(seed); printf("%.5f\n", rand() * 100.0) }';
+}
+
+# queue using an array
+# http://www.tech-recipes.com/rx/911/queue-and-stack-using-array/
+queue=()
+function queue_add {
+    # add an element to the end of the array
+    queue=(${queue[@]} $1)
+}
+function queue_remove {
+    # remove the first element
+    queue=(${queue[@]:1:$((${#queue[@]}))})
+}
+function queue_remove_all {
+    queue=()
+}
+function queue_show_all {
+    echo ${queue[@]}
+}
+function queue_len {
+    echo ${#queue[@]}
 }
 
 
@@ -256,6 +289,94 @@ function sample_metrics {
 }
 
 
+###### monitor_throughput
+
+function get_throughput {
+   if [ $# -ne 1 ] ; then
+        dbg_print "Usage: get_throughput [output dir]"
+        exit 1
+   fi
+
+   local output_dir=$1
+
+   eval "ssh ${REMOTE_USER}@${TCPDUMP_HOST} \"sudo ${TCPDUMP} -i eth0 -Q out -F ${TCPDUMP_FILTER} --throughput-tracking-mode >& tcpdump.log &\""
+   sleep ${SAMPLING_PERIOD_SEC}
+   eval "ssh ${REMOTE_USER}@${TCPDUMP_HOST} \"sudo pkill --signal 2 tcpdump\""
+   eval "scp ${REMOTE_USER}@${TCPDUMP_HOST}:${REMOTE_DIR}/tcpdump.log ${output_dir}/"
+   echo `tail -n1 ${output_dir}/tcpdump.log | cut -d' ' -f9`
+}
+
+function is_within_x_percent {
+    local prev=$1
+    local curr=$2
+
+    # https://stackoverflow.com/questions/806906/how-do-i-test-if-a-variable-is-a-number-in-bash
+    local re='^[0-9]+([.][0-9]+)?$'
+
+    # if [ $prev -eq 0 ] || [ $curr -eq 0 ] ; then
+    if (( $(bc <<< "$prev == 0.0") )) || (( $(bc <<< "$curr == 0.0") )) ; then
+        echo 0
+    elif ! [[ $prev =~ $re ]] || ! [[ $curr =~ $re ]] ; then
+        echo 0
+    else
+        local delta=$(eval "awk 'function abs(v) {return v < 0 ? -v : v}; BEGIN {printf \"%.5f\", 100*abs(($prev)-($curr))/abs($prev)}'")
+        if (( $(bc <<< "$delta < ${WITHIN_X_PERCENT}") )) ; then
+            echo 1
+        else
+            echo 0
+        fi
+    fi
+}
+
+function monitor_throughput {
+   if [ $# -ne 1 ] ; then
+        dbg_print "Usage: monitor_throughput [output dir]"
+        exit 1
+   fi
+   
+   local output_dir=$1
+   local prev=0.0
+   local curr=0.0
+   local t=0
+   local converged=0
+   local log=${output_dir}/convergence.log
+
+   if [ -f $log ] ; then
+       rm $log
+   fi
+
+   queue_remove_all
+   while [ $converged -eq 0 ] && [ $t -lt ${MAX_THROUGHPUT_MONITORING_SEC} ] ; do
+       curr=`get_throughput ${output_dir}`
+       t=$(($t + ${SAMPLING_INTERVAL_SEC}))
+
+       within_x_percent=`is_within_x_percent $prev $curr`
+       queue_add ${within_x_percent}
+
+       if [ `queue_len` -gt $N ] ; then
+           queue_remove
+       fi
+
+       # K out N check
+       sum=0
+       for val in "${queue[@]}" ; do
+           sum=$(($sum + $val))
+       done
+
+       if [ $sum -ge $K ] ; then
+           # let's get out of the loop
+           converged=1
+       fi
+
+       msg="$t, $curr, $sum, $converged"
+       dbg_print "$msg"
+       echo $msg >> $log
+
+       prev=$curr
+   done
+}
+
+
 ###### run_test
 
 function create_hosts_file {
@@ -389,6 +510,9 @@ function do_test() {
         mv $comp ${topo_out_dir}
     done
 
+    dbg_print "Start waiting for throughput to converge"
+    monitor_throughput ${topo_out_dir}
+
     local i
     for ((i=1; i <= ${NUM_SAMPLING}; i++)) ; do
         dbg_print "Sampling metrics ($i/${NUM_SAMPLING})..."
@@ -460,3 +584,4 @@ function stop_kafka {
 function stop_zkserver {
     run_cmd "ssh ${REMOTE_USER}@${ZKSERVER_HOST} \"${ZKSERVER_STOP}\""
 }
+
