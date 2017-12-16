@@ -9,11 +9,23 @@ CORES_PER_VM=2
 
 SAMOA_JAR="${SAMOA_HOME}/target/SAMOA-Storm-0.5.0-incubating-SNAPSHOT.jar"
 
-NUM_TESTS=3     # test per app
-NUM_SAMPLING=3  # sampling per test
-SAMPLING_PERIOD_SEC=5
-SAMPLING_INTERVAL_SEC=5
-MAX_THROUGHPUT_MONITORING_SEC=120
+# For sampling data:
+NUM_TESTS=6    # test per app
+NUM_SAMPLING=1  # sampling per test
+SAMPLING_PERIOD_SEC=30
+SAMPLING_INTERVAL_SEC=10
+
+# For monitor_throughput:
+THROUGHPUT_MONITORING_SAMPLING_PERIOD_SEC=5
+# MAX_THROUGHPUT_MONITORING_SEC=90
+MAX_THROUGHPUT_MONITORING_SEC=45
+# Sampling convergence condition:
+#   If the latest monitored value is within WITHIN_X_PERCENT[%] 
+#   compared to the previous monitored value for K times out of last N times,
+#   we determine the value is converged
+WITHIN_X_PERCENT=5
+N=5
+K=4
 
 HOSTS_FILE=hosts
 TCPDUMP_FILTER=tcpdump_filter
@@ -22,16 +34,11 @@ SYSMON="${REMOTE_DIR}/sysmon"
 
 POST_RUN_SUPERVISOR_WAIT_SEC=20
 POST_KILL_SUPERVISOR_WAIT_SEC=10
-POST_RUN_TOPO_WAIT_SEC=20
+# POST_RUN_TOPO_WAIT_SEC=90
+POST_RUN_TOPO_WAIT_SEC=45
 POST_KILL_TOPO_WAIT_SEC=15
 
-# Sampling convergence condition:
-#   If the latest monitored value is within WITHIN_X_PERCENT[%] 
-#   compared to the previous monitored value for K times out of last N times,
-#   we determine the value is converged
-WITHIN_X_PERCENT=5
-N=5
-K=4
+WGET_MAX_RETRY=3
 
 
 ###### misc functions
@@ -104,7 +111,7 @@ function kill_supervisors {
 
 function run_topo {
     if [ $# -ne 2 ] ; then
-        dbg_print "Usage: run_topo {rsort|sol|wc|clean|grep|pv|visitor|rcount|trident|vhtree} [#VMs(m)]"
+        dbg_print "Usage: run_topo {rsort|sol|wc|clean|grep|pv|visitor|rcount|trident|vhtree|gcount} [#VMs(m)]"
         exit 1    
     fi
 
@@ -122,7 +129,7 @@ function run_topo {
     case "$app" in
         rsort)
             class=RollingSort
-            topo=rollingsort
+            topo=rolling_sort
             topic=rand
             num_comps=2
             ;;
@@ -134,13 +141,13 @@ function run_topo {
             ;;
         wc)
             class=WordCount
-            topo=wordcount
+            topo=word_count
             topic=book
             num_comps=3
             ;;
         clean)
             class=DataClean
-            topo=dataclean
+            topo=data_clean
             topic=view
             num_comps=3
             ;;
@@ -152,25 +159,25 @@ function run_topo {
             ;;
         pv)
             class=PageViewCount
-            topo=pageviewcount
+            topo=page_view_count
             topic=view
             num_comps=3
             ;;
         visitor)
             class=UniqueVisitor
-            topo=uniquevisitor
+            topo=unique_visitor
             topic=view
             num_comps=3
             ;;
         rcount)
             class=RollingCount
-            topo=rollingcount
+            topo=rolling_count
             topic=book
             num_comps=3
             ;;
         trident)
             class=TridentWordCount
-            topo=tridentcount
+            topo=trident_word_count
             topic=book
             num_comps=3
             ;;
@@ -181,6 +188,25 @@ function run_topo {
             topic=rand-tree
             num_classes=10
             is_samoa=true
+            ;;
+        gcount)
+            class=RollingGeoCount
+            topo=rolling_geo_count
+            topic=adsb
+            num_comps=3
+            ;;
+        collision)
+            class=CollisionWarning
+            topo=collision_warning
+            topic=adsb
+            num_comps=3
+            ;;
+        rhcount)
+            class=RollingHashtagCount
+            topo=rolling_hashtag_count
+            topic=tweets
+            num_comps=3
+            ;;
     esac
 
     dbg_print "Submitting ${topo}..."
@@ -190,7 +216,11 @@ function run_topo {
         local parallel=$(($m * ${CORES_PER_VM} / ${num_comps}))
         if [ $parallel -lt 1 ] ; then
             parallel=1
-        fi;
+        fi
+        if [ $app == "collision" ] && [ $parallel -eq 1 ] ; then
+            # Special case for CollisionWarning to divide the computation over multiple tasks
+            parallel=2
+        fi
         local workers=$m
         local ackers=$m
 
@@ -200,7 +230,8 @@ function run_topo {
         local parallel=$(($m - 4))
         if [ $parallel -lt 1 ] ; then
             parallel=1
-        fi;
+        fi
+
         export SAMOA_STORM_NUMWORKER=$m
 
         run_cmd "${SAMOA_HOME}/bin/samoa storm ${SAMOA_JAR} \"PrequentialEvaluation -d /tmp/dump.csv -i -1 -f 100000 -n ${topo} -l (classifiers.trees.VerticalHoeffdingTree -p ${parallel}) -s (org.apache.samoa.streams.kafka.KafkaStream -r 20 -t ${topic} -k $((${num_classes}+1)) -s ${KAFKA_HOST})\""
@@ -215,34 +246,31 @@ function kill_topo {
     local topo
     case "$1" in
         rsort)
-            topo=rollingsort
+            topo=rolling_sort
             ;;
         sol)
             topo=sol
             ;;
         wc)
-            topo=wordcount
+            topo=word_count
             ;;
         clean)
-            topo=dataclean
+            topo=data_clean
             ;;
         grep)
             topo=grep
             ;;
         pv)
-            topo=pageviewcount
+            topo=page_view_count
             ;;
         visitor)
-            topo=uniquevisitorp
+            topo=unique_visitor
             ;;
         trident)
-            topo=tridentwordcount
+            topo=trident_word_count
             ;;
         rcount)
-            topo=rollingcount
-            ;;
-        trident)
-            topo=trident
+            topo=rolling_count
             ;;
         vhtree)
             topo=vhtree
@@ -300,7 +328,7 @@ function get_throughput {
    local output_dir=$1
 
    eval "ssh ${REMOTE_USER}@${TCPDUMP_HOST} \"sudo ${TCPDUMP} -i eth0 -Q out -F ${TCPDUMP_FILTER} --throughput-tracking-mode >& tcpdump.log &\""
-   sleep ${SAMPLING_PERIOD_SEC}
+   sleep ${THROUGHPUT_MONITORING_SAMPLING_PERIOD_SEC}
    eval "ssh ${REMOTE_USER}@${TCPDUMP_HOST} \"sudo pkill --signal 2 tcpdump\""
    eval "scp ${REMOTE_USER}@${TCPDUMP_HOST}:${REMOTE_DIR}/tcpdump.log ${output_dir}/"
    echo `tail -n1 ${output_dir}/tcpdump.log | cut -d' ' -f9`
@@ -348,7 +376,7 @@ function monitor_throughput {
    queue_remove_all
    while [ $converged -eq 0 ] && [ $t -lt ${MAX_THROUGHPUT_MONITORING_SEC} ] ; do
        curr=`get_throughput ${output_dir}`
-       t=$(($t + ${SAMPLING_INTERVAL_SEC}))
+       t=$(($t + ${THROUGHPUT_MONITORING_SAMPLING_PERIOD_SEC}))
 
        within_x_percent=`is_within_x_percent $prev $curr`
        queue_add ${within_x_percent}
@@ -403,6 +431,28 @@ function create_hosts_file {
     done
 }
 
+function run_wget_cmd {
+    if [ $# -ne 2 ] ; then
+        dbg_print "Usage: run_wget_cmd [url] [filename]"
+        exit 1
+    fi
+    local url=$1
+    local filename=$2
+    local retval=ERROR
+    local i
+
+    for ((i=1; i <= ${WGET_MAX_RETRY}; i++)) ; do
+        dbg_print "run_wget_cmd $i try"
+        run_cmd "wget -q $1"
+        if [ -f $filename ] ; then
+            retval=OK
+            break
+        fi
+    done
+
+    # echo $retval
+}
+
 
 function create_tcpdump_filter {
     if [ $# -ne 1 ] ; then
@@ -423,6 +473,7 @@ function create_tcpdump_filter {
     done
     
     printf "dst " > ${TCPDUMP_FILTER}
+    local i
     for ((i = 0; i < ${#slaves[@]}; i++)) ; do 
         if [ $i -eq $((${#slaves[@]} - 1)) ] ; then
             printf "${slaves[$i]}\n" >> ${TCPDUMP_FILTER}
@@ -474,11 +525,25 @@ function do_test() {
                 "FilterProcessor" "LocalStatisticsProcessor"
                 "ModelAggregatorProcessor")
             ;;
+        gcount)
+            comps=("spout" "zone" "rolling_count")
+            ;;
+        collision)
+            comps=(
+                "spout" "latlong_filter" "dist_filter" )
+                # "rolling_sort")
+            ;;
+        rhcount)
+            comps=("spout" "hashtag" "rolling_count")
+            ;;
     esac
 
     dbg_print "Getting topology info for ${app}..."
 
-    run_cmd "wget -q http://${STORM_UI_SERVER}/api/v1/topology/summary"
+    if ls summary* 1> /dev/null 2>&1 ; then
+        rm -f summary*
+    fi
+    run_wget_cmd http://${STORM_UI_SERVER}/api/v1/topology/summary summary
     local summary
     if [ -f "summary" ] ; then
         summary="summary"
@@ -544,9 +609,9 @@ function run_test {
     dbg_print "Creating output dir: ${out_dir}"
     mkdir -p ${out_dir}
 
-    local i
-    for ((i=1; i <= $NUM_TESTS; i++)) ; do
-        dbg_print "======== Starting test ($i/${NUM_TESTS}) ========"
+    local test
+    for ((test=1; test <= $NUM_TESTS; test++)) ; do
+        dbg_print "======== Starting test ($test/${NUM_TESTS}) ========"
         run_topo $app $m
 
         dbg_print "Post run $app wait: ${POST_RUN_TOPO_WAIT_SEC} seconds"
@@ -554,10 +619,10 @@ function run_test {
 
         do_test $app ${out_dir}
 
-        dbg_print "======== Finishing test ($i/${NUM_TESTS}) ========"
+        dbg_print "======== Finishing test ($test/${NUM_TESTS}) ========"
         kill_topo
 
-        if [ $i -eq $NUM_TESTS ] ; then
+        if [ $test -eq $NUM_TESTS ] ; then
             break
         fi
 
